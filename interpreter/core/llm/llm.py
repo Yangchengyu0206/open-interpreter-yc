@@ -3,6 +3,8 @@ import os
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 import sys
 
+# 注意：litellm 在 DEV 模式下會從當前目錄及所有父目錄讀取 .env 檔案。
+# 若父資料夾中存在 .env 檔案，可能導致非預期的 API 金鑰被載入。
 # Note: litellm in DEV mode will load .env files from the current directory
 # and all parent directories. This can lead to unexpected API keys being loaded
 # if there are .env files in parent folders.
@@ -26,15 +28,19 @@ from .run_text_llm import run_text_llm
 from .run_tool_calling_llm import run_tool_calling_llm
 from .utils.convert_to_openai_messages import convert_to_openai_messages
 
+# 建立或取得 logger
 # Create or get the logger
 logger = logging.getLogger("LiteLLM")
 
 
 class SuppressDebugFilter(logging.Filter):
     def filter(self, record):
+        # 只抑制包含特定關鍵字的訊息
         # Suppress only the specific message containing the keywords
         if "cost map" in record.getMessage():
+            # 抑制此 log 訊息
             return False  # Suppress this log message
+        # 允許所有其他訊息
         return True  # Allow all other messages
 
 
@@ -44,27 +50,36 @@ class Llm:
     """
 
     def __init__(self, interpreter):
+        # 將過濾器加入 logger
         # Add the filter to the logger
         logger.addFilter(SuppressDebugFilter())
 
+        # 儲存對父 interpreter 的參考
         # Store a reference to parent interpreter
         self.interpreter = interpreter
 
+        # OpenAI 相容的聊天補全「端點」
         # OpenAI-compatible chat completions "endpoint"
         self.completions = fixed_litellm_completions
 
+        # 設定
         # Settings
         self.model = "gpt-4o"
         self.temperature = 0.0
 
+        # 嘗試自動偵測是否支援視覺
         self.supports_vision = None  # Will try to auto-detect
         self.vision_renderer = (
             self.interpreter.computer.vision.query
+        # 僅在 supports_vision 為 False 時使用
         )  # Will only use if supports_vision is False
 
+        # 嘗試自動偵測是否支援函式呼叫
         self.supports_functions = None  # Will try to auto-detect
+        # 若 supports_functions 為 False，此字串會附加至 system message
         self.execution_instructions = "To execute code on the user's machine, write a markdown code block. Specify the language after the ```. You will receive the output. Use any programming language."  # If supports_functions is False, this will be added to the system message
 
+        # 可選設定
         # Optional settings
         self.context_window = None
         self.max_tokens = None
@@ -73,6 +88,7 @@ class Llm:
         self.api_version = None
         self._is_loaded = False
 
+        # 由 LiteLLM 驅動的預算管理員
         # Budget manager powered by LiteLLM
         self.max_budget = None
 
@@ -98,6 +114,7 @@ class Llm:
             )
             self.max_tokens = int(0.2 * self.context_window)
 
+        # 基本斷言
         # Assertions
         assert (
             messages[0]["role"] == "system"
@@ -116,9 +133,11 @@ class Llm:
         ]:
             model = "claude-3-5-sonnet-20240620"
             self.model = "claude-3-5-sonnet-20240620"
+        # 設置我們的模型端點
         # Setup our model endpoint
         if model == "i":
             model = "openai/i"
+            # 只執行一次
             if not hasattr(self.interpreter, "conversation_id"):  # Only do this once
                 self.context_window = 7000
                 self.api_key = "x"
@@ -126,6 +145,7 @@ class Llm:
                 self.api_base = "https://api.openinterpreter.com/v0"
                 self.interpreter.conversation_id = str(uuid.uuid4())
 
+        # 偵測函式呼叫支援
         # Detect function support
         if self.supports_functions == None:
             try:
@@ -136,6 +156,7 @@ class Llm:
             except:
                 self.supports_functions = False
 
+        # 偵測視覺支援
         # Detect vision support
         if self.supports_vision == None:
             try:
@@ -146,10 +167,12 @@ class Llm:
             except:
                 self.supports_vision = False
 
+        # 若存在圖片訊息則進行裁剪
         # Trim image messages if they're there
         image_messages = [msg for msg in messages if msg["type"] == "image"]
         if self.supports_vision:
             if self.interpreter.os:
+                # 若 interpreter 運行在 OS 模式下，只保留最後兩張圖片
                 # Keep only the last two images if the interpreter is running in OS mode
                 if len(image_messages) > 1:
                     for img_msg in image_messages[:-2]:
@@ -157,12 +180,14 @@ class Llm:
                         if self.interpreter.verbose:
                             print("Removing image message!")
             else:
+                # 刪除中間的圖片（只保留第一張及最後兩張），以減少傳給 LLM 的 token 數
                 # Delete all the middle ones (leave only the first and last 2 images) from messages_for_llm
                 if len(image_messages) > 3:
                     for img_msg in image_messages[1:-2]:
                         messages.remove(img_msg)
                         if self.interpreter.verbose:
                             print("Removing image message!")
+                # 未來可考慮將中間訊息設為 detail: low，而非直接刪除
                 # Idea: we could set detail: low for the middle messages, instead of deleting them
         elif self.supports_vision == False and self.vision_renderer:
             for img_msg in image_messages:
@@ -183,6 +208,7 @@ class Llm:
                         image_description = self.vision_renderer(lmc=img_msg)
                         ocr = self.interpreter.computer.vision.ocr(lmc=img_msg)
 
+                        # 未來可考慮將此格式化為「I see: image_description」顯示給使用者
                         # It would be nice to format this as a message to the user and display it like: "I see: image_description"
 
                         img_msg["content"] = (
@@ -202,6 +228,7 @@ class Llm:
                         img_msg["format"] = "description"
                         img_msg["content"] = ""
 
+        # 轉換為 OpenAI 訊息格式
         # Convert to OpenAI messages format
         messages = convert_to_openai_messages(
             messages,
@@ -214,11 +241,13 @@ class Llm:
         system_message = messages[0]["content"]
         messages = messages[1:]
 
+        # 裁剪訊息長度
         # Trim messages
         try:
             if self.context_window and self.max_tokens:
                 trim_to_be_this_many_tokens = (
                     self.context_window - self.max_tokens - 25
+                # 任意緩衝值
                 )  # arbitrary buffer
                 messages = tt.trim(
                     messages,
@@ -226,6 +255,7 @@ class Llm:
                     max_tokens=trim_to_be_this_many_tokens,
                 )
             elif self.context_window and not self.max_tokens:
+                # 若未設定 max_tokens，則直接裁剪至 context_window 大小
                 # Just trim to the context window if max_tokens not set
                 messages = tt.trim(
                     messages,
@@ -265,21 +295,28 @@ Continuing...
                         messages, system_message=system_message, max_tokens=8000
                     )
         except:
+            # 若我們正在裁剪訊息，此操作可能不起作用。
+            # 若我們裁剪的是未知的模型，此操作可能不起作用。
+            # 在 `messages` 超出限制之前，最好不要失敗，以避免造成挫敗感。
             # If we're trimming messages, this won't work.
             # If we're trimming from a model we don't know, this won't work.
             # Better not to fail until `messages` is too big, just for frustrations sake, I suppose.
 
+            # 將 system message 重新合併至訊息列表
             # Reunite system message with messages
             messages = [{"role": "system", "content": system_message}] + messages
 
             pass
 
+        # 若應存在 system message，就必須確保它存在！
+        # 空的 system message 似乎會被刪除 :(
         # If there should be a system message, there should be a system message!
         # Empty system messages appear to be deleted :(
         if system_message == "":
             if messages[0]["role"] != "system":
                 messages = [{"role": "system", "content": system_message}] + messages
 
+        ## 開始組建請求
         ## Start forming the request
 
         params = {
@@ -288,6 +325,7 @@ Continuing...
             "stream": True,
         }
 
+        # 可選輸入
         # Optional inputs
         if self.api_key:
             params["api_key"] = self.api_key
@@ -302,6 +340,7 @@ Continuing...
         if hasattr(self.interpreter, "conversation_id"):
             params["conversation_id"] = self.interpreter.conversation_id
 
+        # 直接在 LiteLLM 上設置部分參數
         # Set some params directly on LiteLLM
         if self.max_budget:
             litellm.max_budget = self.max_budget
@@ -310,6 +349,7 @@ Continuing...
 
         if (
             self.interpreter.debug == True and False  # DISABLED
+        # debug 等於 "server" 代表我們正在針對伺服器進行除錯
         ):  # debug will equal "server" if we're debugging the server specifically
             print("\n\n\nOPENAI COMPATIBLE MESSAGES:\n\n\n")
             for message in messages:
@@ -326,6 +366,7 @@ Continuing...
         else:
             yield from run_text_llm(self, params)
 
+    # 若更改模型，將 _is_loaded 設為 False
     # If you change model, set _is_loaded to false
     @property
     def model(self):
@@ -352,6 +393,7 @@ Continuing...
             )
             names = []
             try:
+                # 列出所有已下載的 ollama 模型，若未安裝 ollama 則會失敗
                 # List out all downloaded ollama models. Will fail if ollama isn't installed
                 response = requests.get(f"{api_base}/api/tags")
                 if response.ok:
@@ -369,11 +411,13 @@ Continuing...
                 )
                 exit()
 
+            # 若模型尚未安裝則下載
             # Download model if not already installed
             if model_name not in names:
                 self.interpreter.display_message(f"\nDownloading {model_name}...\n")
                 requests.post(f"{api_base}/api/pull", json={"name": model_name})
 
+            # 若尚未設定 context window 則取得之
             # Get context window if not set
             if self.context_window == None:
                 response = requests.post(
@@ -391,6 +435,7 @@ Continuing...
                 if self.context_window != None:
                     self.max_tokens = int(self.context_window * 0.2)
 
+            # 傳送 ping 以實際載入模型
             # Send a ping, which will actually load the model
             model_name = model_name.replace(":latest", "")
             print(f"Loading {model_name}...\n")
@@ -402,6 +447,7 @@ Continuing...
 
             self.interpreter.display_message("*Model loaded.*\n")
 
+        # 驗證 LLM 的邏輯應移至此處！！
         # Validate LLM should be moved here!!
 
         if self.context_window == None:
@@ -423,11 +469,13 @@ def fixed_litellm_completions(**params):
     """
 
     if "local" in params.get("model"):
+        # 有點 Hack，但有時有幫助
         # Kinda hacky, but this helps sometimes
         params["stop"] = ["<|assistant|>", "<|end|>", "<|eot_id|>"]
 
     if params.get("model") == "i" and "conversation_id" in params:
         litellm.drop_params = (
+            # 若不這樣做，litellm 會丟棄此參數！
             False  # If we don't do this, litellm will drop this param!
         )
     else:
@@ -435,6 +483,7 @@ def fixed_litellm_completions(**params):
 
     params["model"] = params["model"].replace(":latest", "")
 
+    # 執行補全
     # Run completion
     attempts = 4
     first_error = None
@@ -450,6 +499,7 @@ def fixed_litellm_completions(**params):
             sys.exit(0)
         except Exception as e:
             if attempt == 0:
+                # 儲存第一個錯誤
                 # Store the first error
                 first_error = e
             if (
@@ -459,9 +509,11 @@ def fixed_litellm_completions(**params):
                 print(
                     "LiteLLM requires an API key. Trying again with a dummy API key. In the future, if this fixes it, please set a dummy API key to prevent this message. (e.g `interpreter --api_key x` or `self.api_key = 'x'`)"
                 )
+                # 使用假的 API 金鑰再試一次
                 # So, let's try one more time with a dummy API key:
                 params["api_key"] = "x"
             if attempt == 1:
+                # 嘗試調高 temperature？
                 # Try turning up the temperature?
                 params["temperature"] = params.get("temperature", 0.0) + 0.1
 

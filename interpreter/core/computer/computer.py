@@ -49,13 +49,16 @@ class Computer:
         self.api_base = "https://api.openinterpreter.com/v0"
         self.save_skills = True
 
+        # 預設為 False
         self.import_computer_api = False  # Defaults to false
+        # 因為我們只想執行一次
         self._has_imported_computer_api = False  # Because we only want to do this once
 
         self.import_skills = False
         self._has_imported_skills = False
         self.max_output = (
             self.interpreter.max_output
+        # 應與 interpreter.max_output 保持一致
         )  # Should mirror interpreter.max_output
 
         computer_tools = "\n".join(
@@ -76,6 +79,7 @@ Do not import the computer module, or any of its sub-modules. They are already i
 
     """.strip()
 
+    # computer.terminal.languages 的捷徑屬性
     # Shortcut for computer.terminal.languages
     @property
     def languages(self):
@@ -116,6 +120,7 @@ Do not import the computer module, or any of its sub-modules. They are already i
         for tool in tools:
             tool_info = self._extract_tool_info(tool)
             for method in tool_info["methods"]:
+                # 格式化為 工具簽名 # 工具描述
                 # Format as tool_signature # tool_description
                 formatted_info = f"{method['signature']} # {method['description']}"
                 tools_signature_and_description.append(formatted_info)
@@ -130,6 +135,7 @@ Do not import the computer module, or any of its sub-modules. They are already i
             methods = []
             for name in dir(tool):
                 if "driver" in name:
+                    # 跳過名稱中包含 'driver' 的方法
                     continue  # Skip methods containing 'driver' in their name
                 attr = getattr(tool, name)
                 if (
@@ -138,6 +144,7 @@ Do not import the computer module, or any of its sub-modules. They are already i
                     and not hasattr(attr, "__wrapped__")
                     and not isinstance(attr, property)
                 ):
+                    # 手動構建方法簽名
                     # Construct the method signature manually
                     param_str = ", ".join(
                         param
@@ -146,8 +153,10 @@ Do not import the computer module, or any of its sub-modules. They are already i
                         ]
                     )
                     full_signature = f"computer.{tool.__class__.__name__.lower()}.{name}({param_str})"
+                    # 取得方法描述
                     # Get the method description
                     method_description = attr.__doc__ or ""
+                    # 附加方法詳細資訊
                     # Append the method details
                     tool_info["methods"].append(
                         {
@@ -158,10 +167,13 @@ Do not import the computer module, or any of its sub-modules. They are already i
             return tool_info
 
         for name, method in inspect.getmembers(tool, predicate=inspect.ismethod):
+            # 根據裝飾器判斷是否應忽略此方法
             # Check if the method should be ignored based on its decorator
             if not name.startswith("_") and not hasattr(method, "__wrapped__"):
+                # 取得方法簽名
                 # Get the method signature
                 method_signature = inspect.signature(method)
+                # 構建不含 *args 和 **kwargs 的簽名字串
                 # Construct the signature string without *args and **kwargs
                 param_str = ", ".join(
                     f"{param.name}"
@@ -173,8 +185,10 @@ Do not import the computer module, or any of its sub-modules. They are already i
                 full_signature = (
                     f"computer.{tool.__class__.__name__.lower()}.{name}({param_str})"
                 )
+                # 取得方法描述
                 # Get the method description
                 method_description = method.__doc__ or ""
+                # 附加方法詳細資訊
                 # Append the method details
                 tool_info["methods"].append(
                     {

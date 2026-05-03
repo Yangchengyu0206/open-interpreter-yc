@@ -21,10 +21,12 @@ if "--os" in sys.argv:
                 try:
                     rich_print(Markdown(line))
                 except UnicodeEncodeError as e:
+                    # 替換有問題的字元或根據需要處理錯誤
                     # Replace the problematic character or handle the error as needed
                     print("Error displaying line:", line)
 
         if "\n" not in message and message.startswith(">"):
+            # 美觀選擇，這些標籤下方需要一個空行
             # Aesthetic choice. For these tags, they need a space below them
             print("")
 
@@ -33,10 +35,12 @@ if "--os" in sys.argv:
     from packaging import version
 
     def check_for_update():
+        # 從 PyPI API 取得最新版本
         # Fetch the latest version from the PyPI API
         response = requests.get(f"https://pypi.org/pypi/open-interpreter/json")
         latest_version = response.json()["info"]["version"]
 
+        # 使用 importlib.metadata 取得當前版本
         # Get the current version using importlib.metadata
         current_version = version("open-interpreter")
 

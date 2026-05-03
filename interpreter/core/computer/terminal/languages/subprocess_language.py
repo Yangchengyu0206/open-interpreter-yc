@@ -74,6 +74,7 @@ class SubprocessLanguage(BaseLanguage):
         retry_count = 0
         max_retries = 3
 
+        # 前置設定
         # Setup
         try:
             code = self.preprocess_code(code)
@@ -99,6 +100,9 @@ class SubprocessLanguage(BaseLanguage):
                 break
             except:
                 if retry_count != 0:
+                    # 為了使用體驗，若只發生一次我喜歡隱藏此錯誤。不顯示錯誤感覺更好。
+                    # 大多數情況下無關緊要，但我們應調查為何以下情況頻繁發生：
+                    # applescript
                     # For UX, I like to hide this if it happens once. Obviously feels better to not see errors
                     # Most of the time it doesn't matter, but we should figure out why it happens frequently with:
                     # applescript
@@ -124,11 +128,14 @@ class SubprocessLanguage(BaseLanguage):
                 yield self.output_queue.get()
             else:
                 time.sleep(0.1)
+            # 等待 0.3 秒
             try:
                 output = self.output_queue.get(timeout=0.3)  # Waits for 0.3 seconds
                 yield output
             except queue.Empty:
                 if self.done.is_set():
+                    # 嘗試再從佇列拉取 3 次……也許裡面還有東西……
+                    # （不確定這是否真的有幫助，也許只需要再拉取一次）
                     # Try to yank 3 more times from it... maybe there's something in there...
                     # (I don't know if this actually helps. Maybe we just need to yank 1 more time)
                     for _ in range(3):
@@ -146,6 +153,7 @@ class SubprocessLanguage(BaseLanguage):
                 line = self.line_postprocessor(line)
 
                 if line is None:
+                    # `line = None` 是後處理器發出完全捨棄此行的訊號
                     continue  # `line = None` is the postprocessor's signal to discard completely
 
                 if self.detect_active_line(line):
@@ -157,6 +165,7 @@ class SubprocessLanguage(BaseLanguage):
                             "content": active_line,
                         }
                     )
+                    # 有時同一行後面還有額外內容，務必一併送出
                     # Sometimes there's a little extra on the same line, so be sure to send that out
                     line = re.sub(r"##active_line\d+##", "", line)
                     if line:
@@ -164,6 +173,7 @@ class SubprocessLanguage(BaseLanguage):
                             {"type": "console", "format": "output", "content": line}
                         )
                 elif self.detect_end_of_execution(line):
+                    # 有時同一行後面還有額外內容，務必一併送出
                     # Sometimes there's a little extra on the same line, so be sure to send that out
                     line = line.replace("##end_of_execution##", "").strip()
                     if line:

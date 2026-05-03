@@ -1,27 +1,15 @@
-###########################################################################################
-# This Dockerfile runs an LMC-compatible websocket server at / on port 8000.              #
-# To learn more about LMC, visit https://docs.openinterpreter.com/protocols/lmc-messages. #
-###########################################################################################
+FROM python:3.12-slim
 
-FROM python:3.11.8
+WORKDIR /app
 
-# Set environment variables
-# ENV OPENAI_API_KEY ...
+RUN apt-get update && apt-get install -y \
+    gcc \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
-ENV HOST 0.0.0.0
-# ^ Sets the server host to 0.0.0.0, Required for the server to be accessible outside the container
+COPY . .
 
-# Copy required files into container
-RUN mkdir -p interpreter scripts
-COPY interpreter/ interpreter/
-COPY scripts/ scripts/
-COPY poetry.lock pyproject.toml README.md ./
+RUN pip install --no-cache-dir -e .
 
-# Expose port 8000
-EXPOSE 8000
-
-# Install server dependencies
-RUN pip install ".[server]"
-
-# Start the server
-ENTRYPOINT ["interpreter", "--server"]
+# 使用 hf_router.py profile，api_key 從環境變數 HF_TOKEN 讀取
+CMD ["interpreter", "--profile", "hf_router.py"]

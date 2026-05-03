@@ -34,6 +34,7 @@ try:
     from fastapi.responses import JSONResponse, PlainTextResponse, StreamingResponse
     from starlette.status import HTTP_403_FORBIDDEN
 except:
+    # 伺服器依賴項不是主要套件所必需的
     # Server dependencies are not required by the main package.
     pass
 
@@ -50,6 +51,7 @@ class AsyncInterpreter(OpenInterpreter):
         self.output_queue = None
         self.unsent_messages = deque()
         self.id = os.getenv("INTERPRETER_ID", datetime.now().timestamp())
+        # 將列印輸出
         self.print = False  # Will print output
 
         self.require_acknowledge = (
@@ -59,6 +61,7 @@ class AsyncInterpreter(OpenInterpreter):
 
         self.server = Server(self)
 
+        # 供 01 使用。允許 OAI 相容伺服器在回應前累積上下文。
         # For the 01. This lets the OAI compatible server accumulate context before responding.
         self.context_mode = False
 
@@ -69,6 +72,7 @@ class AsyncInterpreter(OpenInterpreter):
         """
 
         if "start" in chunk:
+            # 若使用者正在開始某件事，interpreter 應停止。
             # If the user is starting something, the interpreter should stop.
             if self.respond_thread is not None and self.respond_thread.is_alive():
                 self.stop_event.set()
@@ -77,21 +81,26 @@ class AsyncInterpreter(OpenInterpreter):
         elif "content" in chunk:
             self.accumulate(chunk)
         elif "end" in chunk:
+            # 若使用者說完了，interpreter 應開始回應。
             # If the user is done talking, the interpreter should respond.
 
+            # 稍後將預設為 auto_run，除非使用者在此發出指令
             run_code = None  # Will later default to auto_run unless the user makes a command here
 
+            # 但首先處理任何指令。
             # But first, process any commands.
             if self.messages[-1].get("type") == "command":
                 command = self.messages[-1]["content"]
                 self.messages = self.messages[:-1]
 
                 if command == "stop":
+                    # 任何 start 旗標都會在片刻前停止它，但為了確保：
                     # Any start flag would have stopped it a moment ago, but to be sure:
                     self.stop_event.set()
                     self.respond_thread.join()
                     return
                 if command == "go":
+                    # 這是用來批准程式碼執行的。
                     # This is to approve code.
                     run_code = True
                     pass
@@ -118,6 +127,7 @@ class AsyncInterpreter(OpenInterpreter):
                 for chunk_og in self._respond_and_store():
                     chunk = (
                         chunk_og.copy()
+                    # 這修復了奇怪的雙重 token chunks，可能是更深層的問題？
                     )  # This fixes weird double token chunks. Probably a deeper problem?
 
                     if chunk["type"] == "confirmation":

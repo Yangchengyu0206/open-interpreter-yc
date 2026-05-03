@@ -21,6 +21,7 @@ def start_terminal_interface(interpreter):
     Meant to be used from the command line. Parses arguments, starts OI's terminal interface.
     """
 
+    # 改用有伺服器的非同步 interpreter，並在上面設定設定
     # Instead use an async interpreter, which has a server. Set settings on that
     if "--server" in sys.argv:
         from interpreter import AsyncInterpreter
@@ -62,6 +63,7 @@ def start_terminal_interface(interpreter):
             "help_text": "turn off active line highlighting in code blocks",
             "type": bool,
             "action": "store_true",
+            # 預設為 False，表示預設開啟高亮
             "default": False,  # Default to False, meaning highlighting is on by default
         },
         {
@@ -245,12 +247,14 @@ def start_terminal_interface(interpreter):
             "help_text": "experimentally let Open Interpreter control your mouse and keyboard (shortcut for `interpreter --profile os`)",
             "type": bool,
         },
+        # 特殊命令
         # Special commands
         {
             "name": "reset_profile",
             "help_text": "reset a profile file. run `--reset_profile` without an argument to reset all default profiles",
             "type": str,
             "default": "NOT_PROVIDED",
+            # 這表示你可以不傳入任何值
             "nargs": "?",  # This means you can pass in nothing if you want
         },
         {"name": "profiles", "help_text": "opens profiles directory", "type": bool},
@@ -304,6 +308,7 @@ def start_terminal_interface(interpreter):
     if "--stdin" in sys.argv and "--plain" not in sys.argv:
         sys.argv += ["--plain"]
 
+    # i 捷徑
     # i shortcut
     if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
         message = " ".join(sys.argv[1:])
@@ -322,6 +327,7 @@ def start_terminal_interface(interpreter):
 
         # interpreter.debug = True
 
+    # 在解析參數之前檢查已棄用的 flags
     # Check for deprecated flags before parsing arguments
     deprecated_flags = {
         "--debug_mode": "--verbose",
@@ -348,6 +354,7 @@ Use """ to write multi-line messages.
         description="Open Interpreter", usage="%(prog)s [options]"
     )
 
+    # 加入參數
     # Add arguments
     for arg in arguments:
         default = arg.get("default")
@@ -358,6 +365,7 @@ Use """ to write multi-line messages.
         if nickname:
             name_or_flags.append(f"-{nickname}")
 
+        # 構建參數名稱旗標
         # Construct argument name flags
         flags = (
             [f"-{nickname}", f'--{arg["name"]}'] if nickname else [f'--{arg["name"]}']
@@ -385,6 +393,7 @@ Use """ to write multi-line messages.
 
     args, unknown_args = parser.parse_known_args()
 
+    # 處理未知參數
     # handle unknown arguments
     if unknown_args:
         print(f"\nUnrecognized argument(s): {unknown_args}")
@@ -405,11 +414,13 @@ Use """ to write multi-line messages.
     if args.reset_profile is not None and args.reset_profile != "NOT_PROVIDED":
         reset_profile(
             args.reset_profile
+        # 若只執行 `--reset_profile` 不帶參數，這將為 None
         )  # This will be None if they just ran `--reset_profile`
         return
 
     if args.version:
         oi_version = version("open-interpreter")
+        # 每次主要更新時更改此名稱
         update_name = "Developer Preview"  # Change this with each major update
         print(f"Open Interpreter {oi_version} {update_name}")
         return
@@ -417,18 +428,22 @@ Use """ to write multi-line messages.
     if args.no_highlight_active_line:
         interpreter.highlight_active_line = False
 
+    # 若同時啟用 safe_mode 和 auto_run，safe_mode 會停用 auto_run
     # if safe_mode and auto_run are enabled, safe_mode disables auto_run
     if interpreter.auto_run and (
         interpreter.safe_mode == "ask" or interpreter.safe_mode == "auto"
     ):
         setattr(interpreter, "auto_run", False)
 
+    ### 在 interpreter 上設定屬性，以便 profile 腳本可以讀取透過 CLI 傳入的參數
     ### Set attributes on interpreter, so that a profile script can read the arguments passed in via the CLI
 
     set_attributes(args, arguments)
 
+    ### 套用 profile
     ### Apply profile
 
+    # Profile 捷徑，這些大概不應該存在：
     # Profile shortcuts, which should probably not exist:
 
     if args.fast:
@@ -443,6 +458,7 @@ Use """ to write multi-line messages.
     if args.local:
         args.profile = "local.py"
         if args.vision:
+            # 這是本地視覺，設定 moondream！
             # This is local vision, set up moondream!
             interpreter.computer.vision.load()
         if args.os:
@@ -473,6 +489,7 @@ Use """ to write multi-line messages.
         args.profile or get_argument_dictionary(arguments, "profile")["default"],
     )
 
+    ### 在 interpreter 上設定屬性，因為透過 CLI 傳入的參數應覆蓋 profile
     ### Set attributes on interpreter, because the arguments passed in via the CLI should override profile
 
     set_attributes(args, arguments)
@@ -481,6 +498,7 @@ Use """ to write multi-line messages.
         or args.disable_telemetry
     )
 
+    ### 設定一些我們確定可能為真的有用設定
     ### Set some helpful settings we know are likely to be true
 
     if interpreter.llm.model == "gpt-4" or interpreter.llm.model == "openai/gpt-4":
@@ -515,16 +533,19 @@ Use """ to write multi-line messages.
         if interpreter.llm.supports_functions is None:
             interpreter.llm.supports_functions = True
 
+    ### 檢查更新
     ### Check for update
 
     try:
         if not interpreter.offline and not args.stdin:
+            # 此訊息實際上應被推入 utility 中
             # This message should actually be pushed into the utility
             if check_for_update():
                 interpreter.display_message(
                     "> **A new version of Open Interpreter is available.**\n>Please run: `pip install --upgrade open-interpreter`\n\n---"
                 )
     except:
+        # 這不重要
         # Doesn't matter
         pass
 
@@ -538,9 +559,11 @@ Use """ to write multi-line messages.
         ):
             interpreter.llm.model = "openai/" + interpreter.llm.model
         elif interpreter.llm.model.lower().startswith("jan/"):
+            # 從模型名稱中去除 jan/
             # Strip jan/ from the model name
             interpreter.llm.model = interpreter.llm.model[4:]
 
+    # 若使用 --conversations，執行 conversation_navigator
     # If --conversations is used, run conversation_navigator
     if args.conversations:
         conversation_navigator(interpreter)
@@ -555,10 +578,13 @@ Use """ to write multi-line messages.
         interpreter.llm.model = "claude-3-5-sonnet-20240620"
 
     if not args.server:
+        # 伺服器啟動時應執行此操作。但目前無法，因為
+        # 若沒有 API 金鑰，會出現提示，導致整個流程中斷。
         # This SHOULD RUN WHEN THE SERVER STARTS. But it can't rn because
         # if you don't have an API key, a prompt shows up, breaking the whole thing.
         validate_llm_settings(
             interpreter
+        # 這實際上應該只執行 interpreter.llm.load()，一旦它等同於 validate_llm_settings
         )  # This should actually just run interpreter.llm.load() once that's == to validate_llm_settings
 
     if args.server:
@@ -569,6 +595,7 @@ Use """ to write multi-line messages.
 
     contribute_conversation_launch_logic(interpreter)
 
+    # 標準輸入模式
     # Standard in mode
     if args.stdin:
         stdin_input = input()

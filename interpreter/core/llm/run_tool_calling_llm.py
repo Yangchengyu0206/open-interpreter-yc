@@ -16,6 +16,7 @@ tool_schema = {
                     "type": "string",
                     "description": "The programming language (required parameter to the `execute` function)",
                     "enum": [
+                        # 此處將動態填入 OI 可存取的語言清單
                         # This will be filled dynamically with the languages OI has access to.
                     ],
                 },
@@ -42,6 +43,7 @@ def process_messages(messages):
             last_tool_id += 1
             tool_id = f"toolu_{last_tool_id}"
 
+            # 將 function_call 轉換為 tool_calls
             # Convert function_call to tool_calls
             function = message.pop("function_call")
             message["tool_calls"] = [
@@ -49,24 +51,29 @@ def process_messages(messages):
             ]
             processed_messages.append(message)
 
+            # 若下一則訊息是 function response，則一併處理
             # Process the next message if it's a function response
             if i + 1 < len(messages) and messages[i + 1].get("role") == "function":
                 next_message = messages[i + 1].copy()
                 next_message["role"] = "tool"
                 next_message["tool_call_id"] = tool_id
                 processed_messages.append(next_message)
+                # 跳過下一則訊息，因為已處理過了
                 i += 1  # Skip the next message as we've already processed it
             else:
+                # 若沒有 tool response，加入空的 tool response
                 # Add an empty tool response if there isn't one
                 processed_messages.append(
                     {"role": "tool", "tool_call_id": tool_id, "content": ""}
                 )
 
         elif message.get("role") == "function":
+            # 處理孤立的 function responses
             # This handles orphaned function responses
             last_tool_id += 1
             tool_id = f"toolu_{last_tool_id}"
 
+            # 在此孤立的 tool response 之前加入 tool call
             # Add a tool call before this orphaned tool response
             processed_messages.append(
                 {
@@ -84,12 +91,14 @@ def process_messages(messages):
                 }
             )
 
+            # 處理 function response
             # Process the function response
             message["role"] = "tool"
             message["tool_call_id"] = tool_id
             processed_messages.append(message)
 
         else:
+            # 對於與 tool 無關的訊息，直接原樣加入
             # For non-tool-related messages, just add them as is
             processed_messages.append(message)
 
@@ -99,8 +108,10 @@ def process_messages(messages):
 
 
 def run_tool_calling_llm(llm, request_params):
+    ## 設定
     ## Setup
 
+    # 加入 OI 可存取的語言
     # Add languages OI has access to
     tool_schema["function"]["parameters"]["properties"]["language"]["enum"] = [
         i.name.lower() for i in llm.interpreter.computer.terminal.languages
@@ -109,62 +120,7 @@ def run_tool_calling_llm(llm, request_params):
 
     request_params["messages"] = process_messages(request_params["messages"])
 
-    # # This makes any role: tool have the ID of the last tool call
-    # last_tool_id = 0
-    # for i, message in enumerate(request_params["messages"]):
-    #     if "function_call" in message:
-    #         last_tool_id += 1
-    #         function = message.pop("function_call")
-    #         message["tool_calls"] = [
-    #             {
-    #                 "id": "toolu_" + str(last_tool_id),
-    #                 "type": "function",
-    #                 "function": function,
-    #             }
-    #         ]
-    #     if message["role"] == "function":
-    #         if i != 0 and request_params["messages"][i - 1]["role"] == "tool":
-    #             request_params["messages"][i]["content"] += message["content"]
-    #             message = None
-    #         else:
-    #             message["role"] = "tool"
-    #             message["tool_call_id"] = "toolu_" + str(last_tool_id)
-    # request_params["messages"] = [m for m in request_params["messages"] if m != None]
-
-    # This adds an empty tool response for any tool call without a tool response
-    # new_messages = []
-    # for i, message in enumerate(request_params["messages"]):
-    #     new_messages.append(message)
-    #     if "tool_calls" in message:
-    #         tool_call_id = message["tool_calls"][0]["id"]
-    #         if not any(
-    #             m
-    #             for m in request_params["messages"]
-    #             if m.get("role") == "tool" and m.get("tool_call_id") == tool_call_id
-    #         ):
-    #             new_messages.append(
-    #                 {"role": "tool", "tool_call_id": tool_call_id, "content": ""}
-    #             )
-    # request_params["messages"] = new_messages
-
-    # messages = request_params["messages"]
-    # for i in range(len(messages)):
-    #     if messages[i]["role"] == "user" and isinstance(messages[i]["content"], list):
-    #         # Found an image from the user
-    #         image_message = messages[i]
-    #         j = i + 1
-    #         while j < len(messages) and messages[j]["role"] == "tool":
-    #             # Move the image down until it's after all the role: tools
-    #             j += 1
-    #         messages.insert(j, image_message)
-    #         del messages[i]
-    # request_params["messages"] = messages
-
-    # Add OpenAI's recommended function message
-    # request_params["messages"][0][
-    #     "content"
-    # ] += "\nUse ONLY the function you have been provided with — 'execute(language, code)'."
-
+    ## 將輸出轉換為 LMC 格式
     ## Convert output to LMC format
 
     accumulated_deltas = {}
@@ -177,11 +133,13 @@ def run_tool_calling_llm(llm, request_params):
 
     for chunk in llm.completions(**request_params):
         if "choices" not in chunk or len(chunk["choices"]) == 0:
+            # 有時會發生這種情況
             # This happens sometimes
             continue
 
         delta = chunk["choices"][0]["delta"]
 
+        # 將 tool call 轉換為 function call（我們對後者有完善的解析邏輯）
         # Convert tool call into function call, which we have great parsing logic for below
         if "tool_calls" in delta and delta["tool_calls"]:
             function_call_detected = True
@@ -196,11 +154,13 @@ def run_tool_calling_llm(llm, request_params):
                     }
                 }
 
+        # 累積 deltas
         # Accumulate deltas
         accumulated_deltas = merge_deltas(accumulated_deltas, delta)
 
         if "content" in delta and delta["content"]:
             if function_call_detected:
+                # 程式碼區塊之後還有更多內容？這是來自評審層的程式碼審查。
                 # More content after a code block? This is a code review by a judge layer.
 
                 # print("Code safety review:", delta["content"])
@@ -258,10 +218,13 @@ def run_tool_calling_llm(llm, request_params):
             if language is None:
                 language = "python"
 
+            # 直接從 "arguments" 字串中取出程式碼字串
             # Pull the code string straight out of the "arguments" string
             code_delta = accumulated_deltas["function_call"]["arguments"][len(code) :]
+            # 更新程式碼
             # Update the code
             code = accumulated_deltas["function_call"]["arguments"]
+            # 產出 delta
             # Yield the delta
             if code_delta:
                 yield {
@@ -284,16 +247,20 @@ def run_tool_calling_llm(llm, request_params):
                         language is None
                         and "language" in arguments
                         and "code"
+                        # <- 這確保我們已*完成*輸入語言，而非只輸入了一半
                         in arguments  # <- This ensures we're *finished* typing language, as opposed to partially done
                         and arguments["language"]
                     ):
                         language = arguments["language"]
 
                     if language is not None and "code" in arguments:
+                        # 計算 delta（只有新字元）
                         # Calculate the delta (new characters only)
                         code_delta = arguments["code"][len(code) :]
+                        # 更新程式碼
                         # Update the code
                         code = arguments["code"]
+                        # 產出 delta
                         # Yield the delta
                         if code_delta:
                             yield {
