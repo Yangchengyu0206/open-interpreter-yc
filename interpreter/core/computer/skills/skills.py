@@ -149,7 +149,7 @@ class Skills:
 
         code_to_run = ""
         for file in glob.glob(os.path.join(self.path, "*.py")):
-            with open(file, "r") as f:
+            with open(file, "r", encoding="utf-8") as f:
                 code_to_run += f.read() + "\n"
 
         if self.computer.interpreter.debug:
@@ -161,7 +161,7 @@ class Skills:
             # 合併執行失敗時，改成逐檔載入，方便定位問題檔案
             # Import them individually
             for file in glob.glob(os.path.join(self.path, "*.py")):
-                with open(file, "r") as f:
+                with open(file, "r", encoding="utf-8") as f:
                     code_to_run = f.read() + "\n"
 
                 if self.computer.interpreter.debug:
@@ -278,7 +278,7 @@ def {normalized_name}(step=0):
         if not os.path.exists(self.skills.path):
             os.makedirs(self.skills.path)
 
-        with open(skill_file_path, "w") as file:
+        with open(skill_file_path, "w", encoding="utf-8") as file:
             file.write(skill_string)
 
         # 在目前直譯器行程中執行字串程式碼，使函式立刻可用（與載入 skill 類似）

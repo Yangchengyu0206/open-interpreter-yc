@@ -85,6 +85,14 @@ class Terminal:
         return None
 
     def run(self, language, code, stream=False, display=False):
+        # Strip lines that are pure CJK punctuation (e.g. "。" injected by the model)
+        import re as _re
+        _cjk_punct = _re.compile(r'^[\s　-〿＀-￯‘’“”]+$')
+        code = "\n".join(
+            line for line in code.splitlines()
+            if not _cjk_punct.match(line)
+        )
+
         # 檢查是否為 apt install 指令
         # Check if this is an apt install command
         if language == "shell" and code.strip().startswith("apt install"):

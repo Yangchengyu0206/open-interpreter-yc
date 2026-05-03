@@ -327,8 +327,12 @@ Continuing...
 
         # 可選輸入
         # Optional inputs
-        if self.api_key:
-            params["api_key"] = self.api_key
+        _api_key = self.api_key
+        if isinstance(_api_key, str):
+            _api_key = _api_key.strip() or None
+        if _api_key:
+            params["api_key"] = _api_key
+
         if self.api_base:
             params["api_base"] = self.api_base
         if self.api_version:
@@ -462,6 +466,44 @@ Continuing...
                 pass
 
 
+def _coerce_litellm_api_key(params):
+    """新版 OpenAI client 要求在建立 client 時就帶上非空的 api_key。
+
+    Hugging Face Inference / Router（``router.huggingface.co``）只接受 **HF Hub token**。
+    若環境裡先有無效的 ``OPENAI_API_KEY``／占位 dummy，過去「優先 OPENAI」會送出錯金鑰而得到 401。
+    """
+    api_base_l = ((params.get("api_base") or "") + "").lower()
+    uses_hf_inference = "router.huggingface.co" in api_base_l
+
+    hf_tok = (os.getenv("HF_TOKEN") or "").strip()
+    if not hf_tok:
+        hf_tok = (os.getenv("HUGGINGFACE_HUB_TOKEN") or "").strip()
+
+    # Router：一律優先環境中的 Hub token（高於占位 OPENAI_API_KEY）
+    if uses_hf_inference and hf_tok:
+        params["api_key"] = hf_tok
+        return
+
+    k = params.get("api_key")
+    if isinstance(k, str):
+        k = k.strip()
+    if k:
+        params["api_key"] = k
+        return
+
+    priority = (
+        ("HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "OPENAI_API_KEY", "ANTHROPIC_API_KEY")
+        if uses_hf_inference
+        else ("OPENAI_API_KEY", "HF_TOKEN", "HUGGINGFACE_HUB_TOKEN", "ANTHROPIC_API_KEY")
+    )
+    for env_name in priority:
+        v = (os.getenv(env_name) or "").strip()
+        if v:
+            params["api_key"] = v
+            return
+    params["api_key"] = "x"
+
+
 def fixed_litellm_completions(**params):
     """
     Just uses a dummy API key, since we use litellm without an API key sometimes.
@@ -483,6 +525,8 @@ def fixed_litellm_completions(**params):
 
     params["model"] = params["model"].replace(":latest", "")
 
+    _coerce_litellm_api_key(params)
+
     # 執行補全
     # Run completion
     attempts = 4
@@ -502,10 +546,9 @@ def fixed_litellm_completions(**params):
                 # 儲存第一個錯誤
                 # Store the first error
                 first_error = e
-            if (
-                isinstance(e, litellm.exceptions.AuthenticationError)
-                and "api_key" not in params
-            ):
+            if isinstance(e, litellm.exceptions.AuthenticationError) and not str(
+                params.get("api_key", "") or ""
+            ).strip():
                 print(
                     "LiteLLM requires an API key. Trying again with a dummy API key. In the future, if this fixes it, please set a dummy API key to prevent this message. (e.g `interpreter --api_key x` or `self.api_key = 'x'`)"
                 )

@@ -1,3 +1,4 @@
+import os
 import threading
 import time
 
@@ -8,6 +9,28 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
 from webdriver_manager.chrome import ChromeDriverManager
+
+
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
+_REQUEST_TIMEOUT_SEC = 60
+
+
+def _tavily_api_key(computer) -> str:
+    key = getattr(computer, "tavily_api_key", None)
+    return (key or os.getenv("TAVILY_API_KEY") or "").strip()
+
+
+def _parse_tavily_error(response: requests.Response) -> str:
+    try:
+        data = response.json()
+        detail = data.get("detail")
+        if isinstance(detail, dict) and detail.get("error"):
+            return str(detail["error"])
+        if detail:
+            return str(detail)
+        return str(data)
+    except Exception:
+        return response.text or response.reason or "Unknown error"
 
 
 class Browser:
@@ -25,20 +48,105 @@ class Browser:
     def driver(self, value):
         self._driver = value
 
-    def search(self, query):
-        """
-        Searches the web for the specified query and returns the results.
-        """
+    def _search_open_interpreter(self, query):
         response = requests.get(
             f'{self.computer.api_base.strip("/")}/browser/search',
             params={"query": query},
+            timeout=_REQUEST_TIMEOUT_SEC,
         )
+        response.raise_for_status()
         return response.json()["result"]
+
+    def _tavily_settings(self):
+        depth = getattr(self.computer, "tavily_search_depth", None) or os.getenv(
+            "TAVILY_SEARCH_DEPTH", "basic"
+        )
+        mr = getattr(self.computer, "tavily_max_results", None)
+        if mr is None:
+            try:
+                mr = int(os.getenv("TAVILY_MAX_RESULTS", "8"))
+            except ValueError:
+                mr = 8
+        mr = max(1, min(20, int(mr)))
+        include_answer = getattr(self.computer, "tavily_include_answer", None)
+        if include_answer is None:
+            include_answer = os.getenv("TAVILY_INCLUDE_ANSWER", "true").lower() in (
+                "1",
+                "true",
+                "yes",
+            )
+        return depth, mr, include_answer
+
+    def _format_tavily_response(self, data: dict) -> str:
+        parts = []
+        answer = data.get("answer")
+        if isinstance(answer, str) and answer.strip():
+            parts.append(f"### Answer\n\n{answer.strip()}")
+
+        results = data.get("results") or []
+        if results:
+            parts.append("\n### Sources")
+            for i, r in enumerate(results, start=1):
+                title = (r.get("title") or "").strip() or "(no title)"
+                url = (r.get("url") or "").strip()
+                content = (r.get("content") or "").strip()
+                lines = [f"\n{i}. **{title}**"]
+                if url:
+                    lines.append(f"   {url}")
+                if content:
+                    lines.append(f"\n   {content}")
+                parts.append("\n".join(lines))
+
+        out = "\n".join(parts).strip()
+        return out if out else str(data)
+
+    def search(self, query):
+        """
+        Searches the web for the specified query.
+
+        When ``TAVILY_API_KEY`` (env) or ``computer.tavily_api_key`` is set,
+        calls `Tavily Search <https://api.tavily.com/search>`.
+        Otherwise falls back to ``computer.api_base`` ``/browser/search``
+        (Open Interpreter hosted endpoint).
+        """
+        api_key = _tavily_api_key(self.computer)
+        if api_key:
+            return self._search_tavily(query, api_key)
+        return self._search_open_interpreter(query)
+
+    def _search_tavily(self, query, api_key):
+        depth, max_results, include_answer = self._tavily_settings()
+        payload = {
+            "query": query,
+            "search_depth": depth,
+            "max_results": max_results,
+            "include_answer": include_answer,
+        }
+        response = requests.post(
+            TAVILY_SEARCH_URL,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            timeout=_REQUEST_TIMEOUT_SEC,
+        )
+        if not response.ok:
+            raise RuntimeError(
+                f"Tavily Search failed ({response.status_code}): {_parse_tavily_error(response)}"
+            )
+        return self._format_tavily_response(response.json())
 
     def fast_search(self, query):
         """
-        Searches the web for the specified query and returns the results.
+        Searches the web for the specified query.
+
+        Uses Tavily when configured (same as ``search``). Otherwise preserves
+        the legacy behavior (parallel ``/browser/search`` + scripted browser).
         """
+        api_key = _tavily_api_key(self.computer)
+        if api_key:
+            return self._search_tavily(query, api_key)
 
         # Start the request in a separate thread
         response_thread = threading.Thread(
@@ -48,6 +156,7 @@ class Browser:
                 requests.get(
                     f'{self.computer.api_base.strip("/")}/browser/search',
                     params={"query": query},
+                    timeout=_REQUEST_TIMEOUT_SEC,
                 ),
             )
         )
@@ -59,7 +168,7 @@ class Browser:
         # Wait for the request to complete and get the result
         response_thread.join()
         response = response_thread.response
-
+        response.raise_for_status()
         return response.json()["result"]
 
     def setup(self, headless):

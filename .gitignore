@@ -241,3 +241,5 @@ litellm_uuid.txt
 file.txt
 numbers.txt
 poetry.lock
+
+local_tokens.bat

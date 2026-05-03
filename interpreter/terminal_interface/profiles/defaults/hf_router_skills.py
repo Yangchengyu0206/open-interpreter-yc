@@ -26,7 +26,15 @@ from interpreter import interpreter
 # --- 與 hf_router 相同：HF Router + DeepSeek ---
 interpreter.llm.model = "openai/deepseek-ai/DeepSeek-V4-Pro:novita"
 interpreter.llm.api_base = "https://router.huggingface.co/v1"
-interpreter.llm.api_key = os.environ["HF_TOKEN"]
+_hf_token = (
+    os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or ""
+).strip()
+if not _hf_token:
+    raise RuntimeError(
+        "HF Router 需要 Hugging Face Hub token：請設定 HF_TOKEN "
+        "或 HUGGINGFACE_HUB_TOKEN（Docker：-e HF_TOKEN=... ，勿將金鑰寫進程式碼）。"
+    )
+interpreter.llm.api_key = _hf_token
 interpreter.llm.temperature = 0
 
 interpreter.computer.import_computer_api = True
@@ -44,13 +52,24 @@ interpreter.computer.skills.path = str(_SKILLS_DIR)
 interpreter.computer.import_skills = True
 
 interpreter.custom_instructions = """
-此環境已在啟動時載入 `computer.skills.path` 目錄內全部 `*.py`（可含 LangChain / LangGraph；依賴需已安裝在同一 Python 環境）。
+## Available Skills (pre-loaded in Python kernel)
 
-使用方式：
-- 可先執行程式：`print(computer.skills.list())` 會列出「檔案名對應到的可呼叫名稱（顯示成 xxx.py 變 xxx()）」；實際呼叫時請用你的函式名，例如 `example_echo_agent(\"...\")`。
-- 處理使用者需求時：在 markdown 的 ```python ``` 區塊中直接呼叫那些函式，把回傳值當結果解釋給使用者——不需要也不存在另外的 HTTP endpoint。
+The following functions are already defined in the kernel — call them directly in python code blocks:
 
-將主要代理邏輯寫在 skill 資料夾的函式裡；保持對話仍以 Open Interpreter 執行程式碼為主。
+- `web_search(query, max_results=5)` — search the web via Tavily, returns formatted results
+- `web_search_with_answer(query)` — search + AI-summarized answer with sources
+- `example_echo_agent(user_text)` — echo stub for testing
+
+**IMPORTANT — Code block rules:**
+1. NEVER put punctuation (。，！？、) or any non-code text inside a code block.
+2. Code blocks must contain ONLY valid code. No prose, no Chinese characters, no trailing punctuation.
+3. For web searches or real-time information, always use `web_search()` or `web_search_with_answer()` — do NOT use curl, requests to search engines, or computer.browser.search.
+
+Example of correct usage:
+```python
+result = web_search("台南現在天氣")
+print(result)
+```
 """.strip()
 
 try:
