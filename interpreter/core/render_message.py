@@ -3,24 +3,22 @@ import re
 
 def render_message(interpreter, message):
     """
-    Renders a dynamic message into a string.
+    將含動態片段的訊息渲染成字串。
+    `{{ ... }}` 內為 Python 片段，會經 computer 執行後以其輸出替換。
     """
 
     previous_save_skills_setting = interpreter.computer.save_skills
     interpreter.computer.save_skills = False
 
-    # Split the message into parts by {{ and }}, including multi-line strings
+    # 以 {{ 與 }} 分段（含跨行）
     parts = re.split(r"({{.*?}})", message, flags=re.DOTALL)
 
     for i, part in enumerate(parts):
-        # If the part is enclosed in {{ and }}
         if part.startswith("{{") and part.endswith("}}"):
-            # Run the code inside the brackets
             output = interpreter.computer.run(
                 "python", part[2:-2].strip(), display=interpreter.verbose
             )
 
-            # Extract the output content
             outputs = (
                 line["content"]
                 for line in output
@@ -28,15 +26,13 @@ def render_message(interpreter, message):
                 and "IGNORE_ALL_ABOVE_THIS_LINE" not in line["content"]
             )
 
-            # Replace the part with the output
             parts[i] = "\n".join(outputs)
 
-    # Join the parts back into the message
     rendered_message = "".join(parts).strip()
 
     if (
         interpreter.debug == True and False  # DISABLED
-    ):  # debug will equal "server" if we're debugging the server specifically
+    ):
         print("\n\n\nSYSTEM MESSAGE\n\n\n")
         print(rendered_message)
         print("\n\n\n")

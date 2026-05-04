@@ -1,6 +1,8 @@
 import getpass
 import platform
 
+# 送給語言模型的預設「系統提示」內文為英文（行為上需讓多數模型依英文指令執行）。
+# 下列字串不是程式註解，勿當成開發者說明翻譯。
 default_system_message = f"""
 
 You are Open Interpreter, a world-class programmer that can complete any goal by executing code.

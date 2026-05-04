@@ -46,7 +46,7 @@ class SuppressDebugFilter(logging.Filter):
 
 class Llm:
     """
-    A stateless LMC-style LLM with some helpful properties.
+    對 LiteLLM 的包裝：以 LMC 風格訊息串流呼叫模型（類別本身不持久保存對話狀態，狀態在 interpreter.messages）。
     """
 
     def __init__(self, interpreter):

@@ -24,7 +24,7 @@ from interpreter import interpreter
 # =============================================================================
 
 # --- 與 hf_router 相同：HF Router + DeepSeek ---
-interpreter.llm.model = "openai/deepseek-ai/DeepSeek-V4-Pro:novita"
+interpreter.llm.model = "openai/google/gemma-4-31B-it:novita"
 interpreter.llm.api_base = "https://router.huggingface.co/v1"
 _hf_token = (
     os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN") or ""

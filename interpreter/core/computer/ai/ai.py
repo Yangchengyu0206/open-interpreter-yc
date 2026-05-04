@@ -1,3 +1,4 @@
+"""Computer 子模組：長文 map-reduce 查詢與透過 LLM 的簡單 chat（供 `computer.ai` 使用）。"""
 from concurrent.futures import ThreadPoolExecutor
 
 import tiktoken
@@ -30,9 +31,7 @@ def chunk_responses(responses, tokens, llm):
             tokenized_response = encoding.encode(response)
             new_tokens = current_tokens + len(tokenized_response)
 
-            # If the new token count exceeds the limit, handle the current chunk
             if new_tokens > tokens:
-                # If current chunk is empty or response alone exceeds limit, add response as standalone
                 if current_tokens == 0 or len(tokenized_response) > tokens:
                     chunked_responses.append(response)
                 else:
@@ -41,11 +40,9 @@ def chunk_responses(responses, tokens, llm):
                     current_tokens = len(tokenized_response)
                 continue
 
-            # Add response to the current chunk
             current_chunk += "\n\n" + response if current_chunk else response
             current_tokens = new_tokens
 
-        # Add remaining chunk if not empty
         if current_chunk:
             chunked_responses.append(current_chunk)
     except Exception:
@@ -56,9 +53,7 @@ def chunk_responses(responses, tokens, llm):
         for response in responses:
             new_chars = current_chars + len(response)
 
-            # If the new char count exceeds the limit, handle the current chunk
             if new_chars > tokens * 4:
-                # If current chunk is empty or response alone exceeds limit, add response as standalone
                 if current_chars == 0 or len(response) > tokens * 4:
                     chunked_responses.append(response)
                 else:
@@ -67,17 +62,16 @@ def chunk_responses(responses, tokens, llm):
                     current_chars = len(response)
                 continue
 
-            # Add response to the current chunk
             current_chunk += "\n\n" + response if current_chunk else response
             current_chars = new_chars
 
-        # Add remaining chunk if not empty
         if current_chunk:
             chunked_responses.append(current_chunk)
     return chunked_responses
 
 
 def fast_llm(llm, system_message, user_message):
+    """暫時清空 messages，單次問答後還原（給 map 步驟用）。"""
     old_messages = llm.interpreter.messages
     old_system_message = llm.interpreter.system_message
     try:
@@ -91,7 +85,7 @@ def fast_llm(llm, system_message, user_message):
 
 
 def query_map_chunks(chunks, llm, query):
-    """Query the chunks of text using query_chunk_map."""
+    """對每個 chunk 並行送進同一個 query（map）。"""
     with ThreadPoolExecutor() as executor:
         responses = list(
             executor.map(lambda chunk: fast_llm(llm, query, chunk), chunks)
@@ -100,11 +94,10 @@ def query_map_chunks(chunks, llm, query):
 
 
 def query_reduce_chunks(responses, llm, chunk_size, query):
-    """Reduce query responses in a while loop."""
+    """將多段回答反覆合併摘要直到一段（reduce）。"""
     while len(responses) > 1:
         chunks = chunk_responses(responses, chunk_size, llm)
 
-        # Use multithreading to summarize each chunk simultaneously
         with ThreadPoolExecutor() as executor:
             summaries = list(
                 executor.map(lambda chunk: fast_llm(llm, query, chunk), chunks)
@@ -136,7 +129,7 @@ class Ai:
                 response += chunk.get("content")
         return response
 
-        # Old way
+        # 以下舊路徑在 return 之後，實際不可達；保留供日後對照
         old_messages = self.computer.interpreter.llm.interpreter.messages
         old_system_message = self.computer.interpreter.llm.interpreter.system_message
         old_import_computer_api = self.computer.import_computer_api
@@ -171,15 +164,12 @@ class Ai:
         chunk_size = 2000
         overlap = 50
 
-        # Split the text into chunks
         chunks = split_into_chunks(
             text, chunk_size, self.computer.interpreter.llm, overlap
         )
 
-        # (Map) Query each chunk
         responses = query_map_chunks(chunks, self.computer.interpreter.llm, query)
 
-        # (Reduce) Compress the responses
         response = query_reduce_chunks(
             responses, self.computer.interpreter.llm, chunk_size, custom_reduce_query
         )

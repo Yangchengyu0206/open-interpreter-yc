@@ -1,6 +1,6 @@
 """
-This file defines the Interpreter class.
-It's the main file. `from interpreter import interpreter` will import an instance of this class.
+定義 Open Interpreter 主類別。
+本檔為核心入口之一：`from interpreter import interpreter` 會載入此類別的實例。
 """
 import json
 import os
@@ -23,20 +23,19 @@ from .utils.truncate_output import truncate_output
 
 class OpenInterpreter:
     """
-    This class (one instance is called an `interpreter`) is the "grand central station" of this project.
+    專案中的「總樞紐」：一個實例慣稱為 `interpreter`。
 
-    Its responsibilities are to:
+    職責概覽：
 
-    1. Given some user input, prompt the language model.
-    2. Parse the language models responses, converting them into LMC Messages.
-    3. Send code to the computer.
-    4. Parse the computer's response (which will already be LMC Messages).
-    5. Send the computer's response back to the language model.
-    ...
+    1. 依使用者輸入呼叫語言模型。
+    2. 解析模型回應，轉成 LMC 訊息。
+    3. 將程式碼交給 computer 執行。
+    4. 解析 computer 回傳（同樣為 LMC 訊息）。
+    5. 把執行結果再送回語言模型。
 
-    The above process should repeat—going back and forth between the language model and the computer— until:
+    在「模型」與「本機執行」之間重複 1–5，直到：
 
-    6. Decide when the process is finished based on the language model's response.
+    6. 依最後一則模型回應判斷整段流程是否結束。
     """
 
     def __init__(
@@ -82,13 +81,11 @@ class OpenInterpreter:
         plain_text_display=False,
     ):
         # 狀態
-        # State
         self.messages = [] if messages is None else messages
         self.responding = False
         self.last_messages_count = 0
 
         # 設定
-        # Settings
         self.offline = offline
         self.auto_run = auto_run
         self.verbose = verbose
@@ -102,33 +99,28 @@ class OpenInterpreter:
         self.contribute_conversation = contribute_conversation
         self.plain_text_display = plain_text_display
         # 額外設定：切換作用中行高亮，預設為 True
-        self.highlight_active_line = True  # additional setting to toggle active line highlighting. Defaults to True
+        self.highlight_active_line = True  # 是否高亮「正在執行」的那一行，預設 True
 
-        # 迴圈訊息
-        # Loop messages
+        # 迴圈（接上 loop_message 繼續任務）
         self.loop = loop
         self.loop_message = loop_message
         self.loop_breakers = loop_breakers
 
         # 對話歷史
-        # Conversation history
         self.conversation_history = conversation_history
         self.conversation_filename = conversation_filename
         self.conversation_history_path = conversation_history_path
 
-        # OS 控制模式相關屬性
-        # OS control mode related attributes
+        # OS 控制模式（與 computer_use / --os 等相關）
         self.os = os
         self.speak_messages = speak_messages
 
-        # 電腦
-        # Computer
+        # 本機能力（執行語言、檔案、瀏覽器等）
         self.computer = Computer(self) if computer is None else computer
         self.sync_computer = sync_computer
         self.computer.import_computer_api = import_computer_api
 
-        # 技能
-        # Skills
+        # 技能（skills）載入路徑等
         if skills_path:
             self.computer.skills.path = skills_path
 
@@ -137,8 +129,7 @@ class OpenInterpreter:
         # LLM
         self.llm = Llm(self) if llm is None else llm
 
-        # 以下為 LLM 相關屬性
-        # These are LLM related
+        # LLM：system／模板與輸出格式
         self.system_message = system_message
         self.custom_instructions = custom_instructions
         self.user_message_template = user_message_template
@@ -149,15 +140,14 @@ class OpenInterpreter:
 
     def local_setup(self):
         """
-        Opens a wizard that lets terminal users pick a local model.
+        開啟精靈，讓終端使用者選擇本機模型等設定。
         """
         self = local_setup(self)
 
     def wait(self):
         while self.responding:
             time.sleep(0.2)
-        # 回傳新訊息
-        # Return new messages
+        # 只回傳自上次以來新增的訊息
         return self.messages[self.last_messages_count :]
 
     @property
@@ -175,10 +165,8 @@ class OpenInterpreter:
         try:
             self.responding = True
             if self.anonymous_telemetry:
-                # 只傳送訊息型別，不傳送內容
-                message_type = type(
-                    message
-                ).__name__  # Only send message type, no content
+                # 遙測只送型別不送內容
+                message_type = type(message).__name__
                 send_telemetry(
                     "started_chat",
                     properties={
@@ -191,28 +179,23 @@ class OpenInterpreter:
             if not blocking:
                 chat_thread = threading.Thread(
                     target=self.chat, args=(message, display, stream, True)
-                # True 代表 blocking=True
-                )  # True as in blocking = True
+                )  # 第四個參數為 True 即 blocking
                 chat_thread.start()
                 return
 
             if stream:
                 return self._streaming_chat(message=message, display=display)
 
-            # 若 stream=False，則主動從串流中拉取資料
-            # If stream=False, *pull* from the stream.
+            # 若 stream=False，則主動從串流中拉取（消費產生器）
             for _ in self._streaming_chat(message=message, display=display):
                 pass
 
-            # 回傳新訊息
-            # Return new messages
             self.responding = False
             return self.messages[self.last_messages_count :]
 
         except GeneratorExit:
             self.responding = False
-            # 這是正常的
-            # It's fine
+            # 產生器正常關閉
         except Exception as e:
             self.responding = False
             if self.anonymous_telemetry:
@@ -230,53 +213,29 @@ class OpenInterpreter:
             raise
 
     def _streaming_chat(self, message=None, display=True):
-        # 有時多一點程式碼能帶來更好的使用體驗！
-        # display 模式實際上是在 terminal_interface 內部呼叫 interpreter.chat(display=False, stream=True)。
-        # 它將普通的 .chat(display=False) 產生器包裝進顯示層。
-        # 與純產生器模式相當不同，因此重新導向至該模式。
-        # Sometimes a little more code -> a much better experience!
-        # Display mode actually runs interpreter.chat(display=False, stream=True) from within the terminal_interface.
-        # wraps the vanilla .chat(display=False) generator in a display.
-        # Quite different from the plain generator stuff. So redirect to that
+        # display=True 時由 terminal_interface 內部呼叫 .chat(display=False, stream=True)，
+        # 以 Rich 等包一層顯示，與純產生器不同，故直接轉交。
         if display:
             yield from terminal_interface(self, message)
             return
 
-        # 單次訊息
-        # One-off message
+        # 單次對話訊息
         if message or message == "":
-            ## 我們支援多種傳入訊息格式：
-            ## We support multiple formats for the incoming message:
-            # 字典（直接傳入）
-            # Dict (these are passed directly in)
+            # 傳入格式可為：dict、str、list（OpenAI 風格訊息列）
             if isinstance(message, dict):
                 if "role" not in message:
                     message["role"] = "user"
                 self.messages.append(message)
-            # 字串（構建使用者訊息字典）
-            # String (we construct a user message dict)
             elif isinstance(message, str):
                 self.messages.append(
                     {"role": "user", "type": "message", "content": message}
                 )
-            # 列表（類似 OpenAI API 格式）
-            # List (this is like the OpenAI API)
             elif isinstance(message, list):
                 self.messages = message
 
-            # 在使用者訊息加入後設定 last_messages_count，
-            # 如此只回傳使用者訊息之後的新訊息。
-            # Now that the user's messages have been added, we set last_messages_count.
-            # This way we will only return the messages after what they added.
             self.last_messages_count = len(self.messages)
 
-            # 已停用，因為我們認為應直接不將圖片傳給非多模態模型？
-            # 當多模態更普及時再重新啟用：
-            # DISABLED because I think we should just not transmit images to non-multimodal models?
-            # REENABLE this when multimodal becomes more common:
-
-            # 確認我們使用的模型能處理此訊息
-            # Make sure we're using a model that can handle this
+            # 以下曾計畫在非多模態模型時阻擋 image 訊息，目前停用；多模態普及後可再啟用。
             # if not self.llm.supports_vision:
             #     for message in self.messages:
             #         if message["type"] == "image":
@@ -284,27 +243,18 @@ class OpenInterpreter:
             #                 "Use a multimodal model and set `interpreter.llm.supports_vision` to True to handle image messages."
             #             )
 
-            # 一切在此發生！
-            # This is where it all happens!
             yield from self._respond_and_store()
 
-            # 若已開啟對話歷史，則儲存對話
-            # Save conversation if we've turned conversation_history on
             if self.conversation_history:
-                # 若是第一則訊息，設定對話名稱
-                # If it's the first message, set the conversation name
                 if not self.conversation_filename:
                     first_few_words_list = self.messages[0]["content"][:25].split(" ")
                     if (
                         len(first_few_words_list) >= 2
-                    # 適用英文等詞語間有空格的語言
-                    ):  # for languages like English with blank between words
+                    ):  # 英文等有空白分詞
                         first_few_words = "_".join(first_few_words_list[:-1])
-                    else:  # for languages like Chinese without blank between words
-                        # 適用中文等詞語間無空格的語言
+                    else:  # 中文等無空白分詞
                         first_few_words = self.messages[0]["content"][:15]
-                    # 排除檔名非法字元
-                    for char in '<>:"/\\|?*!\n':  # Invalid characters for filenames
+                    for char in '<>:"/\\|?*!\n':  # 檔名不允許的字元
                         first_few_words = first_few_words.replace(char, "")
 
                     date = datetime.now().strftime("%B_%d_%Y_%H-%M-%S")
@@ -312,12 +262,8 @@ class OpenInterpreter:
                         "__".join([first_few_words, date]) + ".json"
                     )
 
-                # 若目錄不存在則建立
-                # Check if the directory exists, if not, create it
                 if not os.path.exists(self.conversation_history_path):
                     os.makedirs(self.conversation_history_path)
-                # 寫入或覆蓋檔案
-                # Write or overwrite the file
                 with open(
                     os.path.join(
                         self.conversation_history_path, self.conversation_filename
@@ -333,17 +279,13 @@ class OpenInterpreter:
 
     def _respond_and_store(self):
         """
-        Pulls from the respond stream, adding delimiters. Some things, like active_line, console, confirmation... these act specially.
-        Also assembles new messages and adds them to `self.messages`.
+        從 respond 串流拉取 chunk，處理分界（active_line、console、confirmation 等特例），
+        並組裝後寫入 self.messages。
         """
         self.verbose = False
 
-        # 工具函式
-        # Utility function
         def is_ephemeral(chunk):
-            """
-            Ephemeral = this chunk doesn't contribute to a message we want to save.
-            """
+            """不寫入長期 messages 的短生命期 chunk（例如作用中行高亮）。"""
             if "format" in chunk and chunk["format"] == "active_line":
                 return True
             if chunk["type"] == "review":
@@ -354,8 +296,7 @@ class OpenInterpreter:
 
         try:
             for chunk in respond(self):
-                # 供非同步使用
-                # For async usage
+                # 非同步／伺服器用法：檢查 stop_event
                 if hasattr(self, "stop_event") and self.stop_event.is_set():
                     print("Open Interpreter stopping.")
                     break
@@ -363,14 +304,11 @@ class OpenInterpreter:
                 if chunk["content"] == "":
                     continue
 
-                # 若 active_line 為 None，表示程式碼執行完畢
-                # If active_line is None, we finished running code.
+                # active_line 內容為 None 表示該段程式執行結束
                 if (
                     chunk.get("format") == "active_line"
                     and chunk.get("content", "") == None
                 ):
-                    # 若尚未產生輸出，加入空輸出
-                    # If output wasn't yet produced, add an empty output
                     if self.messages[-1]["role"] != "computer":
                         self.messages.append(
                             {
@@ -381,11 +319,8 @@ class OpenInterpreter:
                             }
                         )
 
-                # 處理特殊的「confirmation」chunk，它既不觸發旗標也不建立訊息
-                # Handle the special "confirmation" chunk, which neither triggers a flag or creates a message
+                # 確認執行前的特殊 chunk（不自動當成一般訊息）
                 if chunk["type"] == "confirmation":
-                    # 為最後的訊息型別發出結束旗標，並重置 last_flag_base
-                    # Emit a end flag for the last message type, and reset last_flag_base
                     if last_flag_base:
                         yield {**last_flag_base, "end": True}
                         last_flag_base = None
@@ -393,10 +328,7 @@ class OpenInterpreter:
                     if self.auto_run == False:
                         yield chunk
 
-                    # 即使內容未被填入，我們也想在此時附加，
-                    # 這樣就能知道執行沒有產生輸出。
-                    # We want to append this now, so even if content is never filled, we know that the execution didn't produce output.
-                    # ... rethink this though.
+                    # 曾考慮在此強制附加空輸出以利辨識「無輸出」；保留註解區塊備查。
                     # self.messages.append(
                     #     {
                     #         "role": "computer",
@@ -407,8 +339,7 @@ class OpenInterpreter:
                     # )
                     continue
 
-                # 檢查 chunk 的 role、type 和 format（若存在）是否與 last_flag_base 相符
-                # Check if the chunk's role, type, and format (if present) match the last_flag_base
+                # 判斷是否延續同一則串流訊息（role/type/format）
                 if (
                     last_flag_base
                     and "role" in chunk
@@ -423,10 +354,7 @@ class OpenInterpreter:
                         )
                     )
                 ):
-                    # 若相符，將 chunk 的內容追加至當前訊息
-                    # （active_line 除外，它不應被儲存）
-                    # If they match, append the chunk's content to the current message's content
-                    # (Except active_line, which shouldn't be stored)
+                    # 相接同一訊息（短生命期的 active_line 等由 is_ephemeral 排除）
                     if not is_ephemeral(chunk):
                         if any(
                             [
@@ -442,62 +370,46 @@ class OpenInterpreter:
                         else:
                             self.messages[-1]["content"] += chunk["content"]
                 else:
-                    # 若不相符，為上一個訊息型別發出結束訊息，並為新型別發出開始訊息
-                    # If they don't match, yield a end message for the last message type and a start message for the new one
                     if last_flag_base:
                         yield {**last_flag_base, "end": True}
 
                     last_flag_base = {"role": chunk["role"], "type": chunk["type"]}
 
-                    # 對 type: "console" 的旗標不加入 format，以同時支援 active_line 和 output 格式
-                    # Don't add format to type: "console" flags, to accommodate active_line AND output formats
+                    # console 類型不強制帶 format，以便兼容 active_line 與 output
                     if "format" in chunk and chunk["type"] != "console":
                         last_flag_base["format"] = chunk["format"]
 
                     yield {**last_flag_base, "start": True}
 
-                    # 將 chunk 作為新訊息加入
-                    # Add the chunk as a new message
                     if not is_ephemeral(chunk):
                         self.messages.append(chunk)
 
-                # 產出 chunk 本身
-                # Yield the chunk itself
                 yield chunk
 
-                # 若為主控台輸出，則裁剪輸出長度
-                # Truncate output if it's console output
                 if chunk["type"] == "console" and chunk["format"] == "output":
                     self.messages[-1]["content"] = truncate_output(
                         self.messages[-1]["content"],
                         self.max_output,
-                        # 我認為捲軸列是電腦 API 的功能
-                        add_scrollbars=self.computer.import_computer_api,  # I consider scrollbars to be a computer API thing
+                        add_scrollbars=self.computer.import_computer_api,
                     )
 
-            # 發出最終結束旗標
-            # Yield a final end flag
             if last_flag_base:
                 yield {**last_flag_base, "end": True}
         except GeneratorExit:
-            raise  # gotta pass this up!
+            raise
 
     def reset(self):
-        self.computer.terminate()  # Terminates all languages
-        # 重置旗標
-        self.computer._has_imported_computer_api = False  # Flag reset
+        self.computer.terminate()  # 結束各語言直譯／子程序
+        self.computer._has_imported_computer_api = False
         self.messages = []
         self.last_messages_count = 0
 
     def display_message(self, markdown):
-        # 方便 profiles 中的 start_script 使用
-        # This is just handy for start_script in profiles.
+        # 供 profile 的 start_script 等呼叫
         if self.plain_text_display:
             print(markdown)
         else:
             display_markdown_message(markdown)
 
     def get_oi_dir(self):
-        # 同樣方便 profiles 中的 start_script 使用
-        # Again, just handy for start_script in profiles.
         return oi_dir
