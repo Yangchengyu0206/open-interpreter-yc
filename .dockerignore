@@ -1,9 +1,37 @@
-.git
-__pycache__
-*.pyc
-*.pyo
+# 虛擬環境（最重要！避免將巨大的 .venv 打包進 image）
+.venv/
+venv/
+env/
+
+# Python 快取
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+
+# 機密檔案
+token.txt
+local_tokens.bat
 .env
-*.egg-info
-dist
-build
-.pytest_cache
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# 測試與 CI
+.pytest_cache/
+.coverage
+htmlcov/
+
+# 文件
+docs/
+
+# 打包產出
+*.tar
+*.log

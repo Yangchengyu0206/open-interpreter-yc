@@ -22,6 +22,52 @@ import uuid
 import requests
 import tokentrim as tt
 
+# Insecure TLS override for corporate self-signed environments.
+# This runs at module import time, so it applies even if profile-level patches
+# are skipped in certain execution paths.
+_insecure_tls = (
+    (os.getenv("OI_INSECURE_SKIP_TLS_VERIFY", "false") or "").strip().lower()
+    == "true"
+)
+if _insecure_tls:
+    os.environ["PYTHONHTTPSVERIFY"] = "0"
+    os.environ["REQUESTS_CA_BUNDLE"] = ""
+    os.environ["CURL_CA_BUNDLE"] = ""
+    os.environ["SSL_CERT_FILE"] = ""
+    os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
+
+    # Force requests verify=False globally.
+    try:
+        _orig_req = requests.sessions.Session.request
+
+        def _req_no_verify(self, method, url, **kwargs):
+            kwargs["verify"] = False
+            return _orig_req(self, method, url, **kwargs)
+
+        requests.sessions.Session.request = _req_no_verify
+    except Exception:
+        pass
+
+    # Force httpx verify=False globally (OpenAI SDK uses httpx underneath).
+    try:
+        import httpx
+
+        _orig_client_init = httpx.Client.__init__
+        _orig_async_client_init = httpx.AsyncClient.__init__
+
+        def _client_init_no_verify(self, *args, **kwargs):
+            kwargs["verify"] = False
+            return _orig_client_init(self, *args, **kwargs)
+
+        def _async_client_init_no_verify(self, *args, **kwargs):
+            kwargs["verify"] = False
+            return _orig_async_client_init(self, *args, **kwargs)
+
+        httpx.Client.__init__ = _client_init_no_verify
+        httpx.AsyncClient.__init__ = _async_client_init_no_verify
+    except Exception:
+        pass
+
 from .run_text_llm import run_text_llm
 
 # from .run_function_calling_llm import run_function_calling_llm
@@ -526,6 +572,19 @@ def fixed_litellm_completions(**params):
     params["model"] = params["model"].replace(":latest", "")
 
     _coerce_litellm_api_key(params)
+
+    # Optional insecure mode for corporate self-signed TLS environments.
+    # This is intentionally explicit and env-gated.
+    insecure_tls = (
+        (os.getenv("OI_INSECURE_SKIP_TLS_VERIFY", "false") or "")
+        .strip()
+        .lower()
+        == "true"
+    )
+    if insecure_tls:
+        params["verify_ssl"] = False
+        if hasattr(litellm, "ssl_verify"):
+            litellm.ssl_verify = False
 
     # 執行補全
     # Run completion

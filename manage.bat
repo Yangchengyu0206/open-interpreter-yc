@@ -10,7 +10,7 @@ if exist "local_tokens.bat" call local_tokens.bat
 
 set "IMAGE_TAG=open-interpreter-yc"
 set "CTR_NAME=oi-yc-dev"
-set "OI_PROFILE=hf_router.py"
+set "OI_PROFILE=env_driven.py"
 
 :MAIN
 cls
@@ -228,7 +228,7 @@ exit /b 0
 :DOCKER_ENV_ARGS
 set "ENV_ARGS="
 if exist "%CD%\.env" set "ENV_ARGS=!ENV_ARGS! --env-file ""%CD%\.env"""
-if defined HF_TOKEN set "ENV_ARGS=!ENV_ARGS! -e HF_TOKEN=!HF_TOKEN!"
-if defined TAVILY_API_KEY set "ENV_ARGS=!ENV_ARGS! -e TAVILY_API_KEY=!TAVILY_API_KEY!"
+if defined HF_TOKEN if /I not "!HF_TOKEN!"=="PASTE_HF_TOKEN" set "ENV_ARGS=!ENV_ARGS! -e HF_TOKEN=!HF_TOKEN!"
+if defined TAVILY_API_KEY if /I not "!TAVILY_API_KEY!"=="PASTE_TAVILY_KEY" set "ENV_ARGS=!ENV_ARGS! -e TAVILY_API_KEY=!TAVILY_API_KEY!"
 if defined CUSTOM_SKILLS_DIR set "ENV_ARGS=!ENV_ARGS! -e CUSTOM_SKILLS_DIR=!CUSTOM_SKILLS_DIR!"
 goto :eof

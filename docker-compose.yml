@@ -1,0 +1,38 @@
+services:
+  interpreter:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: open-interpreter-yc:latest
+    pull_policy: never
+    container_name: oi-yc
+    # 互動式 CLI 需要 stdin + tty
+    stdin_open: true
+    tty: true
+    env_file:
+      - .env
+    environment:
+      - PYTHONUTF8=1
+      - PYTHONIOENCODING=utf-8
+      # Corporate TLS / proxy compatibility (optional, set in .env when needed)
+      - REQUESTS_CA_BUNDLE=${REQUESTS_CA_BUNDLE:-}
+      - SSL_CERT_FILE=${SSL_CERT_FILE:-}
+      - CURL_CA_BUNDLE=${CURL_CA_BUNDLE:-}
+      - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,llm.ai.himax.com.tw,hf-tei.ai.himax.com.tw,hxstudio.himax.com.tw}
+    volumes:
+      # custom_skills 掛載：讓容器看得到最新 skills，不需要重建 image
+      - ./custom_skills:/app/custom_skills
+      # workspace：容器內的工作目錄，對應 host 上的 workspace 資料夾
+      - ${WORKDIR:-./workspace}:/workspace
+      # Put your corporate CA file under ./certs and set *_CA_BUNDLE to /opt/certs/<file>.pem
+      - ./certs:/opt/certs:ro
+    working_dir: /workspace
+    # 預設以 env_driven profile 啟動（可由 compose run 覆寫）
+    command: ["interpreter", "--profile", "env_driven.py"]
+    restart: always
+    extra_hosts:
+      - "llm.ai.himax.com.tw:10.241.241.31"
+      - "hf-tei.ai.himax.com.tw:10.241.241.31"
+      - "hxstudio.himax.com.tw:10.240.233.75"
+
+

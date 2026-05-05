@@ -4,164 +4,139 @@ chcp 65001 >nul
 cd /d "%~dp0"
 
 set "ROOT=%~dp0"
-set "VENV=%ROOT%.venv"
-set "PY=%VENV%\Scripts\python.exe"
-set "INTR=%VENV%\Scripts\interpreter.exe"
-set "PROFILE=hf_router_skills.py"
+set "IMAGE_TAG=open-interpreter-yc"
+set "CTR_NAME=oi-yc"
+set "OI_PROFILE=env_driven.py"
 
-REM --- Load .env via Python (handles LF/CRLF, spaces, quoting) ---
-call :load_dotenv
+REM Load .env and local_tokens.bat
 if exist "%ROOT%local_tokens.bat" call "%ROOT%local_tokens.bat"
 
 :MENU
 cls
 echo ============================================================
-echo  Open Interpreter YC  --  start.bat
+echo  Open Interpreter YC  --  Docker Launcher
 echo ============================================================
 echo.
-echo  [1] Run  (local venv)
-echo  [2] Setup / rebuild venv
-echo  [3] Install / update tavily-python
-echo  [4] Docker build + run
-echo  [5] Docker menu (manage.bat)
-echo  [0] Exit
-echo.
-if exist "%PY%" (
-    echo  venv     : OK
-) else (
-    echo  venv     : NOT FOUND -- run option 2 first
-)
+echo  Image  : %IMAGE_TAG%
+echo  Profile: %OI_PROFILE%
 if defined HF_TOKEN (
-    echo  HF_TOKEN : !HF_TOKEN:~0,8!...
+    echo  HF_TOKEN     : !HF_TOKEN:~0,8!...
 ) else (
-    echo  HF_TOKEN : NOT SET
+    echo  HF_TOKEN     : NOT SET
 )
 if defined TAVILY_API_KEY (
-    echo  Tavily   : !TAVILY_API_KEY:~0,8!...
+    echo  Tavily       : !TAVILY_API_KEY:~0,8!...
 ) else (
-    echo  Tavily   : NOT SET
+    echo  Tavily       : NOT SET
 )
 echo.
-set /p "C=Enter 0-5: "
+echo  [1] Build image
+echo  [2] Run ^(interactive -it^)
+echo  [3] Run ^(detached^)
+echo  [4] Stop / remove container
+echo  [5] View logs
+echo  [6] Enter container shell
+echo  [7] Build + Run ^(rebuild and run^)
+echo  [8] Docker advanced menu ^(manage.bat^)
+echo  [9] Export image ^(.tar for offline use^)
+echo  [0] Exit
+echo.
+
+docker --version >nul 2>&1
+if !errorlevel! neq 0 (
+    echo  [WARN] Docker not running.
+)
+
+set /p "C=Enter 0-9: "
 if "!C!"=="" goto MENU
-if "!C!"=="1" goto RUN
-if "!C!"=="2" goto SETUP
-if "!C!"=="3" goto TAVILY
-if "!C!"=="4" goto DOCKER
-if "!C!"=="5" goto MANAGE
+if "!C!"=="1" goto BUILD
+if "!C!"=="2" goto RUN_IT
+if "!C!"=="3" goto RUN_DETACHED
+if "!C!"=="4" goto STOP
+if "!C!"=="5" goto LOGS
+if "!C!"=="6" goto SHELL
+if "!C!"=="7" goto REBUILD_RUN
+if "!C!"=="8" goto MANAGE
+if "!C!"=="9" goto EXPORT
 if "!C!"=="0" goto END
 goto MENU
 
 REM ---------------------------------------------------------------------------
-:RUN
+:BUILD
 echo.
-if not exist "%PY%" (
-    echo [ERR] .venv not found. Run option 2 first.
-    pause & goto MENU
-)
-if not defined HF_TOKEN (
-    set /p "HF_TOKEN=HF_TOKEN (paste here, or press Enter to abort): "
-    if "!HF_TOKEN!"=="" (
-        echo [ERR] HF_TOKEN required.
-        pause & goto MENU
-    )
-)
-echo [*] Token check:
-echo     HF_TOKEN       = !HF_TOKEN:~0,12!...
-if defined TAVILY_API_KEY (
-    echo     TAVILY_API_KEY = !TAVILY_API_KEY:~0,12!...
+echo [*] Building %IMAGE_TAG% ...
+docker build -t "%IMAGE_TAG%" "%ROOT%."
+if !errorlevel! equ 0 (echo [OK] Build complete) else (echo [FAIL] Build failed)
+pause & goto MENU
+
+REM ---------------------------------------------------------------------------
+:RUN_IT
+echo.
+echo [*] Interactive run (Ctrl+D or type exit to quit)
+call :ENV_ARGS
+if defined WORKDIR (
+    echo     WORKDIR: "%WORKDIR%" to /workspace
+    docker run -it --rm !_ENV! -v "%WORKDIR%:/workspace" -w /workspace "%IMAGE_TAG%" interpreter --profile %OI_PROFILE%
 ) else (
-    echo     TAVILY_API_KEY = NOT SET
-)
-echo.
-echo [*] Starting Open Interpreter ...
-echo     Profile : %PROFILE%
-echo     Ctrl+D or type 'exit' to quit.
-echo.
-set PYTHONUTF8=1
-set PYTHONIOENCODING=utf-8
-if exist "%INTR%" (
-    "%INTR%" --profile "%PROFILE%"
-) else (
-    "%PY%" -m interpreter.terminal_interface.start_terminal_interface --profile "%PROFILE%"
+    docker run -it --rm !_ENV! -v "%ROOT%workspace:/workspace" -w /workspace "%IMAGE_TAG%" interpreter --profile %OI_PROFILE%
 )
 goto MENU
 
 REM ---------------------------------------------------------------------------
-:SETUP
+:RUN_DETACHED
 echo.
-echo [*] Looking for Python 3.9-3.12 ...
-set "RUNPY="
-py -3.12 --version >nul 2>&1 && set "RUNPY=py -3.12"
-if not defined RUNPY (
-    py -3.11 --version >nul 2>&1 && set "RUNPY=py -3.11"
+echo [*] Starting detached container %CTR_NAME% ...
+docker rm -f "%CTR_NAME%" 2>nul
+call :ENV_ARGS
+if defined WORKDIR (
+    docker run -d --name "%CTR_NAME%" !_ENV! -v "%WORKDIR%:/workspace" -w /workspace "%IMAGE_TAG%" interpreter --profile %OI_PROFILE%
+) else (
+    docker run -d --name "%CTR_NAME%" !_ENV! -v "%ROOT%workspace:/workspace" -w /workspace "%IMAGE_TAG%" interpreter --profile %OI_PROFILE%
 )
-if not defined RUNPY (
-    py -3.10 --version >nul 2>&1 && set "RUNPY=py -3.10"
+if !errorlevel! equ 0 (
+    echo [OK] Started
+    docker ps --filter "name=%CTR_NAME%"
+) else (
+    echo [FAIL]
 )
-if not defined RUNPY (
-    py -3.9 --version >nul 2>&1 && set "RUNPY=py -3.9"
-)
-if not defined RUNPY (
-    echo [ERR] Python 3.9-3.12 not found. Install from python.org
-    pause & goto MENU
-)
-echo [*] Using: !RUNPY!
-
-if exist "%VENV%\Scripts\python.exe" (
-    echo.
-    echo [WARN] .venv already exists.
-    set /p "REC=Type Y to delete and rebuild, other key to cancel: "
-    if /i "!REC!"=="Y" (
-        echo [*] Removing .venv ...
-        rmdir /s /q "%VENV%"
-    ) else (
-        echo Cancelled.
-        pause & goto MENU
-    )
-)
-
-echo [*] Creating .venv ...
-!RUNPY! -m venv "%VENV%"
-if errorlevel 1 ( echo [ERR] venv creation failed. & pause & goto MENU )
-
-echo [*] Upgrading pip ...
-"%PY%" -m pip install -U pip -q
-
-echo [*] Installing open-interpreter (editable) ...
-"%PY%" -m pip install -e "%ROOT%." -q
-if errorlevel 1 ( echo [ERR] install failed. & pause & goto MENU )
-
-echo [*] Installing tavily-python ...
-"%PY%" -m pip install tavily-python -q
-
-echo.
-echo [OK] Setup complete. Run option 1 to start.
 pause & goto MENU
 
 REM ---------------------------------------------------------------------------
-:TAVILY
+:STOP
 echo.
-if not exist "%PY%" ( echo [ERR] No venv. Run option 2 first. & pause & goto MENU )
-echo [*] Installing/updating tavily-python ...
-"%PY%" -m pip install -U tavily-python
-echo [OK] Done.
+echo [*] Stopping and removing %CTR_NAME% ...
+docker stop "%CTR_NAME%" 2>nul
+docker rm "%CTR_NAME%" 2>nul
+echo [OK]
 pause & goto MENU
 
 REM ---------------------------------------------------------------------------
-:DOCKER
+:LOGS
 echo.
-docker --version >nul 2>&1
-if errorlevel 1 ( echo [ERR] Docker not running. & pause & goto MENU )
-if not defined HF_TOKEN (
-    echo [ERR] HF_TOKEN not set.
-    pause & goto MENU
+echo [*] logs -f (Ctrl+C to stop)
+docker logs -f "%CTR_NAME%"
+goto MENU
+
+REM ---------------------------------------------------------------------------
+:SHELL
+echo.
+echo [*] Enter container shell ...
+docker exec -it "%CTR_NAME%" /bin/bash
+if !errorlevel! neq 0 docker exec -it "%CTR_NAME%" /bin/sh
+goto MENU
+
+REM ---------------------------------------------------------------------------
+:REBUILD_RUN
+echo.
+echo [*] Build + interactive run ...
+docker build -t "%IMAGE_TAG%" "%ROOT%."
+if !errorlevel! neq 0 ( echo [FAIL] Build failed & pause & goto MENU )
+call :ENV_ARGS
+if defined WORKDIR (
+    docker run -it --rm !_ENV! -v "%WORKDIR%:/workspace" -w /workspace "%IMAGE_TAG%" interpreter --profile %OI_PROFILE%
+) else (
+    docker run -it --rm !_ENV! -v "%ROOT%workspace:/workspace" -w /workspace "%IMAGE_TAG%" interpreter --profile %OI_PROFILE%
 )
-echo [*] Docker build ...
-docker build -t open-interpreter-yc "%ROOT%."
-if errorlevel 1 ( echo [ERR] Build failed. & pause & goto MENU )
-echo [*] Docker run ...
-docker run -it --rm --env-file "%ROOT%.env" -e HF_TOKEN=!HF_TOKEN! open-interpreter-yc
 goto MENU
 
 REM ---------------------------------------------------------------------------
@@ -175,28 +150,28 @@ if exist "%ROOT%manage.bat" (
 goto MENU
 
 REM ---------------------------------------------------------------------------
-:load_dotenv
-REM Use Python to parse .env (handles LF/CRLF and edge cases)
-set "_DOTENV_SH="
-set "_DOTENV_PY=%ROOT%scripts\emit_dotenv_for_cmd.py"
-if exist "%PY%" (
-    for /f "delims=" %%F in ('"%PY%" "!_DOTENV_PY!" 2^>nul') do set "_DOTENV_SH=%%F"
-)
-if not defined _DOTENV_SH (
-    for /f "delims=" %%F in ('py -3 "!_DOTENV_PY!" 2^>nul') do set "_DOTENV_SH=%%F"
-)
-if not defined _DOTENV_SH (
-    for /f "delims=" %%F in ('python "!_DOTENV_PY!" 2^>nul') do set "_DOTENV_SH=%%F"
-)
-if defined _DOTENV_SH if exist "!_DOTENV_SH!" (
-    call "!_DOTENV_SH!"
-    del "!_DOTENV_SH!" >nul 2>&1
-)
-set "_DOTENV_SH="
-set "_DOTENV_PY="
-goto :eof
+:EXPORT
+echo.
+set /p "EXPORT_PATH=Export path (Enter = open-interpreter-yc.tar): "
+if "!EXPORT_PATH!"=="" set "EXPORT_PATH=%ROOT%open-interpreter-yc.tar"
+docker save -o "!EXPORT_PATH!" "%IMAGE_TAG%"
+if !errorlevel! equ 0 (
+    echo [OK] !EXPORT_PATH!
+    for %%A in ("!EXPORT_PATH!") do echo Size: %%~zA bytes
+) else echo [FAIL]
+pause & goto MENU
 
+REM ---------------------------------------------------------------------------
 :END
 echo Bye.
 endlocal
 exit /b 0
+
+REM ---------------------------------------------------------------------------
+:ENV_ARGS
+set "_ENV="
+if exist "%ROOT%.env" set "_ENV=!_ENV! --env-file ""%ROOT%.env"""
+if defined HF_TOKEN if /I not "!HF_TOKEN!"=="PASTE_HF_TOKEN" set "_ENV=!_ENV! -e HF_TOKEN=!HF_TOKEN!"
+if defined TAVILY_API_KEY if /I not "!TAVILY_API_KEY!"=="PASTE_TAVILY_KEY" set "_ENV=!_ENV! -e TAVILY_API_KEY=!TAVILY_API_KEY!"
+if defined CUSTOM_SKILLS_DIR set "_ENV=!_ENV! -e CUSTOM_SKILLS_DIR=!CUSTOM_SKILLS_DIR!"
+goto :eof

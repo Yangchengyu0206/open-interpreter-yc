@@ -3,6 +3,9 @@ setlocal
 chcp 65001 >nul
 cd /d "%~dp0"
 
+REM 強制 uv 使用系統憑證，繞過公司防火牆的憑證問題
+set UV_NATIVE_TLS=1
+
 REM 傳入參數範例（選用）：
 REM   Deploy-OneClick.cmd -FreshVenv
 REM   Deploy-OneClick.cmd -SkipTavily
