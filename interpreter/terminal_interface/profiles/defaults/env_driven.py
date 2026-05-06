@@ -26,51 +26,11 @@ env_driven.py — 統一由環境變數驅動的 Open Interpreter profile
 """
 import json
 import os
-import ssl
 from pathlib import Path
 
 from interpreter import interpreter
 
-# ── Optional insecure mode: skip TLS cert verification (HIGH RISK) ────────────
-_skip_tls_verify = (
-    os.environ.get("OI_INSECURE_SKIP_TLS_VERIFY", "false").strip().lower() == "true"
-)
-if _skip_tls_verify:
-    # Disable certificate verification globally for this Python process.
-    os.environ["PYTHONHTTPSVERIFY"] = "0"
-    os.environ["REQUESTS_CA_BUNDLE"] = ""
-    os.environ["CURL_CA_BUNDLE"] = ""
-    os.environ["SSL_CERT_FILE"] = ""
-    os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
-    ssl._create_default_https_context = ssl._create_unverified_context
-    ssl.create_default_context = ssl._create_unverified_context
-
-    # Force-disable TLS verification for libraries that manage their own clients.
-    try:
-        import httpx
-
-        if hasattr(httpx, "_config") and hasattr(httpx._config, "create_ssl_context"):
-            _orig_httpx_create_ssl_context = httpx._config.create_ssl_context
-
-            def _insecure_httpx_ssl_context(*args, **kwargs):
-                return ssl._create_unverified_context()
-
-            httpx._config.create_ssl_context = _insecure_httpx_ssl_context
-    except Exception:
-        pass
-
-    try:
-        import requests
-
-        _orig_requests_request = requests.sessions.Session.request
-
-        def _insecure_requests_request(self, method, url, **kwargs):
-            kwargs["verify"] = False
-            return _orig_requests_request(self, method, url, **kwargs)
-
-        requests.sessions.Session.request = _insecure_requests_request
-    except Exception:
-        pass
+# TLS bypass is handled centrally in interpreter/core/llm/llm.py at import time.
 
 # ── LLM Provider ──────────────────────────────────────────────────────────────
 _provider = os.environ.get("LLM_PROVIDER", "company").strip().lower()

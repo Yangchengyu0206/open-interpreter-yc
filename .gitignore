@@ -243,3 +243,8 @@ numbers.txt
 poetry.lock
 
 local_tokens.bat
+
+# Docker offline image exports (docker save)
+*.tar
+*.tar.gz
+*.tgz

@@ -22,22 +22,35 @@ import uuid
 import requests
 import tokentrim as tt
 
-# Insecure TLS override for corporate self-signed environments.
-# This runs at module import time, so it applies even if profile-level patches
-# are skipped in certain execution paths.
+# ── Insecure TLS bypass for corporate self-signed environments ─────────────────
+# Single authoritative location. Runs at module import time, before any HTTP
+# client (litellm/httpx/requests) can be instantiated.
 _insecure_tls = (
     (os.getenv("OI_INSECURE_SKIP_TLS_VERIFY", "false") or "").strip().lower()
     == "true"
 )
 if _insecure_tls:
+    import ssl
+
+    # stdlib ssl (catches anything that calls ssl.create_default_context)
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+    # Environment flags consumed by various libraries
     os.environ["PYTHONHTTPSVERIFY"] = "0"
     os.environ["REQUESTS_CA_BUNDLE"] = ""
     os.environ["CURL_CA_BUNDLE"] = ""
     os.environ["SSL_CERT_FILE"] = ""
     os.environ["HF_HUB_DISABLE_SSL_VERIFY"] = "1"
 
-    # Force requests verify=False globally.
+    # litellm global flag (checked before it builds its internal httpx client)
+    litellm.ssl_verify = False
+
+    # requests + urllib3 — suppress warnings and patch Session
     try:
+        requests.packages.urllib3.disable_warnings(
+            requests.packages.urllib3.exceptions.InsecureRequestWarning
+        )
+
         _orig_req = requests.sessions.Session.request
 
         def _req_no_verify(self, method, url, **kwargs):
@@ -48,7 +61,7 @@ if _insecure_tls:
     except Exception:
         pass
 
-    # Force httpx verify=False globally (OpenAI SDK uses httpx underneath).
+    # httpx — patch Client/AsyncClient constructors (OpenAI SDK & litellm use httpx)
     try:
         import httpx
 
@@ -67,6 +80,7 @@ if _insecure_tls:
         httpx.AsyncClient.__init__ = _async_client_init_no_verify
     except Exception:
         pass
+# ──────────────────────────────────────────────────────────────────────────────
 
 from .run_text_llm import run_text_llm
 
@@ -572,19 +586,6 @@ def fixed_litellm_completions(**params):
     params["model"] = params["model"].replace(":latest", "")
 
     _coerce_litellm_api_key(params)
-
-    # Optional insecure mode for corporate self-signed TLS environments.
-    # This is intentionally explicit and env-gated.
-    insecure_tls = (
-        (os.getenv("OI_INSECURE_SKIP_TLS_VERIFY", "false") or "")
-        .strip()
-        .lower()
-        == "true"
-    )
-    if insecure_tls:
-        params["verify_ssl"] = False
-        if hasattr(litellm, "ssl_verify"):
-            litellm.ssl_verify = False
 
     # 執行補全
     # Run completion
