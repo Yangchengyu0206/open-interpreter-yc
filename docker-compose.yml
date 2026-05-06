@@ -20,6 +20,7 @@ services:
       - CURL_CA_BUNDLE=${CURL_CA_BUNDLE:-}
       - NO_PROXY=${NO_PROXY:-localhost,127.0.0.1,llm.ai.himax.com.tw,hf-tei.ai.himax.com.tw,hxstudio.himax.com.tw}
     volumes:
+      - ./interpreter:/app/interpreter
       # custom_skills 掛載：讓容器看得到最新 skills，不需要重建 image
       - ./custom_skills:/app/custom_skills
       # workspace：容器內的工作目錄，對應 host 上的 workspace 資料夾

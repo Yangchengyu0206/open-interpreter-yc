@@ -37,7 +37,14 @@ if not defined HF_TOKEN (
     echo.
 )
 
-echo Commands:
+echo --- docker compose (docker-compose.yml) ---
+echo   [c1] compose up -d   ^(start / recreate^)
+echo   [c2] compose down
+echo   [c3] compose ps
+echo   [c4] compose logs -f
+echo   [c5] compose build   ^(rebuild image via compose^)
+echo.
+echo --- docker run (one-off / debug) ---
 echo   [1]  Build image
 echo   [2]  Run REPL interactive - docker run -it --rm
 echo   [3]  Run REPL detached  - docker run -d named %CTR_NAME%
@@ -53,9 +60,14 @@ echo   [12] Session: set HF_TOKEN, profile, WORKDIR ^(memory only^)
 echo   [0]  Exit
 echo.
 
-set /p choice="Enter 0-12: "
+set /p choice="Enter choice: "
 if "!choice!"=="" goto MAIN
 
+if /i "!choice!"=="c1" goto COMPOSE_UP
+if /i "!choice!"=="c2" goto COMPOSE_DOWN
+if /i "!choice!"=="c3" goto COMPOSE_PS
+if /i "!choice!"=="c4" goto COMPOSE_LOGS
+if /i "!choice!"=="c5" goto COMPOSE_BUILD
 if "!choice!"=="1" goto BUILD
 if "!choice!"=="2" goto RUN_INTERACTIVE
 if "!choice!"=="3" goto RUN_DETACHED
@@ -70,6 +82,42 @@ if "!choice!"=="11" goto EXPORT_IMG
 if "!choice!"=="12" goto ENV_SESSION
 if "!choice!"=="0" goto END
 goto MAIN
+
+:COMPOSE_UP
+echo.
+echo [c1] compose up -d ...
+docker compose up -d
+if !errorlevel! equ 0 (
+    echo [OK] Started via compose.
+    docker compose ps
+) else echo [FAIL]
+goto PAUSE
+
+:COMPOSE_DOWN
+echo.
+echo [c2] compose down ...
+docker compose down
+if !errorlevel! equ 0 (echo [OK]) else echo [FAIL]
+goto PAUSE
+
+:COMPOSE_PS
+echo.
+echo [c3] compose ps
+docker compose ps
+goto PAUSE
+
+:COMPOSE_LOGS
+echo.
+echo [c4] compose logs -f ^(Ctrl+C to stop^)
+docker compose logs -f
+goto MAIN
+
+:COMPOSE_BUILD
+echo.
+echo [c5] compose build ...
+docker compose build
+if !errorlevel! equ 0 (echo [OK] Build ok) else echo [FAIL]
+goto PAUSE
 
 :BUILD
 echo.
